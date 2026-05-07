@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 import logging
 import time
-import schedule
 import json
 from datetime import datetime, timedelta
 from telegram import Bot
@@ -36,8 +35,6 @@ PARAMS = {
     "AUDJPY=X": {'lb': (80, 160),  'adx': 12, 'cap': None, 'ts': 20},
 }
 
-SCAN_INTERVAL_HOURS = 2
-TELEGRAM_DELAY_SEC = 1
 STATE_FILE = "trading_state.json"
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -220,18 +217,13 @@ def mark_sent(symbol, sig):
 # ---------- TELEGRAM ----------
 def kirim_telegram(pesan):
     try:
-        # Hapus parse_mode agar tidak error pada format tertentu
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=pesan)
         logging.info("✅ Notifikasi terkirim.")
-        time.sleep(TELEGRAM_DELAY_SEC)
+        time.sleep(1)
     except TelegramError as e:
         logging.error(f"Telegram error: {e}")
     except Exception as e:
         logging.error(f"Error umum: {e}")
-
-def send_startup():
-    pesan = "🤖 **Bot Sinyal Aktif**\nScan 7 pair setiap 2 jam.\nParameter optimal per pair (backtest 2015‑2026)."
-    kirim_telegram(pesan)
 
 def send_alert(symbol, signal):
     ts = signal['time_stop']
@@ -290,13 +282,11 @@ def scan_all():
 
 # ---------- MAIN ----------
 def main():
-      # <-- hapus setelah yakin token benar
-    send_startup()
+    # Kirim notifikasi startup tanpa spam
+    # (dijalankan hanya saat workflow di-trigger)
+    # kirim_telegram("🤖 Bot Sinyal Aktif (startup)")
+
     scan_all()
-    schedule.every(SCAN_INTERVAL_HOURS).hours.do(scan_all)
-    while True:
-        schedule.run_pending()
-        time.sleep(60)
 
 if __name__ == "__main__":
     main()
