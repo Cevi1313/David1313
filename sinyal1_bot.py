@@ -290,7 +290,7 @@ def scan_all():
 
 # ---------- MAIN ----------
 def main():
-    kirim_telegram("✅ Tes: bot berfungsi.")   # <-- hapus setelah yakin token benar
+      # <-- hapus setelah yakin token benar
     send_startup()
     scan_all()
     schedule.every(SCAN_INTERVAL_HOURS).hours.do(scan_all)
