@@ -13,9 +13,8 @@ from telegram.error import TelegramError
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# 7 pair terbaik hasil backtest 2015-2026
 SYMBOLS = [
-    "GC=F",        # Gold
+    "GC=F",
     "USDJPY=X",
     "NZDJPY=X",
     "CHFJPY=X",
@@ -24,7 +23,6 @@ SYMBOLS = [
     "AUDJPY=X"
 ]
 
-# Parameter optimal per pair (Lookback, ADX, Cap, Time Stop)
 PARAMS = {
     "GC=F":     {'lb': (120, 240), 'adx': 12, 'cap': None, 'ts': 20},
     "USDJPY=X": {'lb': (60, 120),  'adx': 16, 'cap': 500,  'ts': None},
@@ -40,7 +38,6 @@ STATE_FILE = "trading_state.json"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 bot = Bot(token=TELEGRAM_TOKEN)
 
-# ================= FUNGSI-FUNGSI =================
 def get_pip_size(symbol):
     if 'JPY' in symbol:
         return 0.01
@@ -187,7 +184,6 @@ def detect_signals(df4, ind, support, resistance, symbol):
         })
     return signals
 
-# ---------- STATE ANTI DUPLIKASI ----------
 def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, 'r') as f:
@@ -214,7 +210,6 @@ def mark_sent(symbol, sig):
     state[key] = datetime.now().isoformat()
     save_state(state)
 
-# ---------- TELEGRAM ----------
 def kirim_telegram(pesan):
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=pesan)
@@ -242,7 +237,6 @@ def send_alert(symbol, signal):
     )
     kirim_telegram(msg)
 
-# ---------- SCAN ----------
 def scan_symbol(symbol):
     logging.info(f"Scanning {symbol}...")
     df4 = fetch_h4(symbol, days=30)
@@ -270,7 +264,7 @@ def scan_symbol(symbol):
     else:
         logging.info(f"{symbol}: No signal")
 
-def scan_all():
+def main():
     logging.info("=== SCAN DIMULAI ===")
     for sym in SYMBOLS:
         try:
@@ -279,14 +273,6 @@ def scan_all():
         except Exception as e:
             logging.error(f"Error {sym}: {e}")
     logging.info("=== SCAN SELESAI ===")
-
-# ---------- MAIN ----------
-def main():
-    # Kirim notifikasi startup tanpa spam
-    # (dijalankan hanya saat workflow di-trigger)
-    # kirim_telegram("🤖 Bot Sinyal Aktif (startup)")
-
-    scan_all()
 
 if __name__ == "__main__":
     main()
