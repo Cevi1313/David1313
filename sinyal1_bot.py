@@ -10,12 +10,13 @@ from datetime import datetime, timedelta
 from telegram import Bot
 from telegram.error import TelegramError
 
-# ---------- CONFIG ----------
+# ================= KONFIGURASI =================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+# 7 pair terbaik hasil backtest 2015-2026
 SYMBOLS = [
-    "GC=F",          # Gold
+    "GC=F",        # Gold
     "USDJPY=X",
     "NZDJPY=X",
     "CHFJPY=X",
@@ -24,18 +25,17 @@ SYMBOLS = [
     "AUDJPY=X"
 ]
 
-# ---------- PARAMETER OPTIMAL PER PAIR ----------
+# Parameter optimal per pair (Lookback, ADX, Cap, Time Stop)
 PARAMS = {
-    "GC=F":       {'lb': (120,240), 'adx': 12, 'cap': None, 'ts': 20},
-    "USDJPY=X":   {'lb': (60,120),  'adx': 16, 'cap': 500, 'ts': None},
-    "NZDJPY=X":   {'lb': (80,160),  'adx': 12, 'cap': None, 'ts': 20},
-    "CHFJPY=X":   {'lb': (80,160),  'adx': 12, 'cap': None, 'ts': 20},
-    "USDCAD=X":   {'lb': (80,160),  'adx': 12, 'cap': None, 'ts': 20},
-    "CADJPY=X":   {'lb': (80,160),  'adx': 12, 'cap': None, 'ts': 20},
-    "AUDJPY=X":   {'lb': (80,160),  'adx': 12, 'cap': None, 'ts': 20},
+    "GC=F":     {'lb': (120, 240), 'adx': 12, 'cap': None, 'ts': 20},
+    "USDJPY=X": {'lb': (60, 120),  'adx': 16, 'cap': 500,  'ts': None},
+    "NZDJPY=X": {'lb': (80, 160),  'adx': 12, 'cap': None, 'ts': 20},
+    "CHFJPY=X": {'lb': (80, 160),  'adx': 12, 'cap': None, 'ts': 20},
+    "USDCAD=X": {'lb': (80, 160),  'adx': 12, 'cap': None, 'ts': 20},
+    "CADJPY=X": {'lb': (80, 160),  'adx': 12, 'cap': None, 'ts': 20},
+    "AUDJPY=X": {'lb': (80, 160),  'adx': 12, 'cap': None, 'ts': 20},
 }
 
-# ---------- SCAN ----------
 SCAN_INTERVAL_HOURS = 2
 TELEGRAM_DELAY_SEC = 1
 STATE_FILE = "trading_state.json"
@@ -43,7 +43,7 @@ STATE_FILE = "trading_state.json"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 bot = Bot(token=TELEGRAM_TOKEN)
 
-# ---------- HELPER ----------
+# ================= FUNGSI-FUNGSI =================
 def get_pip_size(symbol):
     if 'JPY' in symbol:
         return 0.01
@@ -190,7 +190,7 @@ def detect_signals(df4, ind, support, resistance, symbol):
         })
     return signals
 
-# ---------- STATE ----------
+# ---------- STATE ANTI DUPLIKASI ----------
 def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, 'r') as f:
@@ -220,17 +220,24 @@ def mark_sent(symbol, sig):
 # ---------- TELEGRAM ----------
 def kirim_telegram(pesan):
     try:
-        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=pesan, parse_mode='Markdown')
+        # Hapus parse_mode agar tidak error pada format tertentu
+        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=pesan)
         logging.info("✅ Notifikasi terkirim.")
         time.sleep(TELEGRAM_DELAY_SEC)
     except TelegramError as e:
         logging.error(f"Telegram error: {e}")
+    except Exception as e:
+        logging.error(f"Error umum: {e}")
+
+def send_startup():
+    pesan = "🤖 **Bot Sinyal Aktif**\nScan 7 pair setiap 2 jam.\nParameter optimal per pair (backtest 2015‑2026)."
+    kirim_telegram(pesan)
 
 def send_alert(symbol, signal):
     ts = signal['time_stop']
     ts_str = f"{ts} bar H4" if ts else "Tidak ada"
     msg = (
-        f"🔔 **SINYAL TRADING** 🔔\n"
+        f"🔔 **SINYAL TRADING**\n"
         f"Symbol: {symbol}\n"
         f"Signal: {signal['type']}\n"
         f"Entry: {signal['entry']}\n"
@@ -248,7 +255,7 @@ def scan_symbol(symbol):
     logging.info(f"Scanning {symbol}...")
     df4 = fetch_h4(symbol, days=30)
     if df4 is None or len(df4) < 160:
-        logging.warning(f"Data tidak cukup untuk {symbol}")
+        logging.warning(f"Data tidak cukup {symbol}")
         return
     cfg = PARAMS.get(symbol, PARAMS["AUDJPY=X"])
     lb_short, lb_long = cfg['lb']
@@ -268,12 +275,11 @@ def scan_symbol(symbol):
                 continue
             mark_sent(symbol, sig)
             send_alert(symbol, sig)
-            print(f"🔔 {symbol} - {sig['type']} @ {sig['entry']} | SL={sig['sl']} TP={sig['tp']}")
     else:
         logging.info(f"{symbol}: No signal")
 
 def scan_all():
-    logging.info("=== SCAN MULTI-PAIR DIMULAI ===")
+    logging.info("=== SCAN DIMULAI ===")
     for sym in SYMBOLS:
         try:
             scan_symbol(sym)
@@ -284,10 +290,8 @@ def scan_all():
 
 # ---------- MAIN ----------
 def main():
-    # --- TES NOTIFIKASI ---
-    kirim_telegram("✅ Tes: bot berfungsi.")
-    # -----------------------
-
+    kirim_telegram("✅ Tes: bot berfungsi.")   # <-- hapus setelah yakin token benar
+    send_startup()
     scan_all()
     schedule.every(SCAN_INTERVAL_HOURS).hours.do(scan_all)
     while True:
