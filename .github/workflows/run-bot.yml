@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install dependencies
-        run: pip install yfinance pandas numpy requests
+        run: pip install yfinance pandas numpy requests schedule python-telegram-bot==13.15
       - name: Run bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
