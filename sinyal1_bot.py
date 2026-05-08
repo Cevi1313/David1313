@@ -7,7 +7,7 @@ import time
 import json
 from datetime import datetime, timedelta
 from telegram import Bot
-from telegram.error import TelegramError
+from telegram.error import TelegramError, TimedOut, RetryAfter
 
 # ================= KONFIGURASI =================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -210,15 +210,23 @@ def mark_sent(symbol, sig):
     state[key] = datetime.now().isoformat()
     save_state(state)
 
-def kirim_telegram(pesan):
-    try:
-        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=pesan)
-        logging.info("✅ Notifikasi terkirim.")
-        time.sleep(1)
-    except TelegramError as e:
-        logging.error(f"Telegram error: {e}")
-    except Exception as e:
-        logging.error(f"Error umum: {e}")
+# ============= PERBAIKAN UTAMA =============
+def kirim_telegram(pesan, max_retries=3):
+    """Kirim pesan ke Telegram dengan retry mekanisme (maks 3 kali, jeda eksponensial)"""
+    for attempt in range(max_retries):
+        try:
+            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=pesan, timeout=10)
+            logging.info(f"✅ Notifikasi terkirim (percobaan ke-{attempt+1})")
+            return True
+        except (TimedOut, RetryAfter, TelegramError) as e:
+            wait = 2 ** attempt  # 1, 2, 4 detik
+            logging.warning(f"Telegram error (attempt {attempt+1}/{max_retries}): {e}. Retry dalam {wait} detik")
+            time.sleep(wait)
+        except Exception as e:
+            logging.error(f"Error umum di kirim_telegram: {e}")
+            break
+    logging.error("❌ Gagal mengirim pesan ke Telegram setelah beberapa percobaan")
+    return False
 
 def send_alert(symbol, signal):
     ts = signal['time_stop']
@@ -235,7 +243,8 @@ def send_alert(symbol, signal):
         f"Time Stop: {ts_str}\n"
         f"Waktu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     )
-    kirim_telegram(msg)
+    success = kirim_telegram(msg)
+    return success
 
 def scan_symbol(symbol):
     logging.info(f"Scanning {symbol}...")
@@ -257,22 +266,28 @@ def scan_symbol(symbol):
     if signals:
         for sig in signals:
             if is_duplicate(symbol, sig):
-                logging.info(f"{symbol}: Duplicate ignored")
+                logging.info(f"{symbol}: Duplicate ignored (sudah dikirim dalam 24 jam)")
                 continue
-            mark_sent(symbol, sig)
-            send_alert(symbol, sig)
+            # Kirim dulu, baru tandai sebagai terkirim jika sukses
+            if send_alert(symbol, sig):
+                mark_sent(symbol, sig)
+                logging.info(f"{symbol}: Signal {sig['type']} terkirim")
+            else:
+                logging.warning(f"{symbol}: Signal {sig['type']} gagal dikirim, tidak ditandai duplicate -> akan dicoba di run berikutnya")
     else:
         logging.info(f"{symbol}: No signal")
 
 def main():
     logging.info("=== SCAN DIMULAI ===")
+    start_time = time.time()
     for sym in SYMBOLS:
         try:
             scan_symbol(sym)
             time.sleep(2)
         except Exception as e:
             logging.error(f"Error {sym}: {e}")
-    logging.info("=== SCAN SELESAI ===")
+    elapsed = time.time() - start_time
+    logging.info(f"=== SCAN SELESAI dalam {elapsed:.2f} detik ===")
 
 if __name__ == "__main__":
     main()
