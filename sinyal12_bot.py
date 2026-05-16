@@ -15,14 +15,13 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 SYMBOLS = [
-    "GC=F",        # XAUUSD
     "USDJPY=X", "GBPJPY=X", "CHFJPY=X", "AUDJPY=X",
     "EURJPY=X", "CADJPY=X", "NZDJPY=X",
     "AUDUSD=X", "EURGBP=X", "NZDUSD=X", "USDCHF=X",
+    "EURUSD=X", "GBPUSD=X", "USDCAD=X", "EURNZD=X",
 ]
 
 PAIR_CONFIG = {
-    "GC=F":       {'tp': 500, 'sl': 250, 'pip_value': 0.10},
     "USDJPY=X":   {'tp': 80,  'sl': 75,  'pip_value': 0.01},
     "GBPJPY=X":   {'tp': 150, 'sl': 100, 'pip_value': 0.01},
     "CHFJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01},
@@ -34,6 +33,10 @@ PAIR_CONFIG = {
     "EURGBP=X":   {'tp': 80,  'sl': 75,  'pip_value': 0.0001},
     "NZDUSD=X":   {'tp': 120, 'sl': 100, 'pip_value': 0.0001},
     "USDCHF=X":   {'tp': 80,  'sl': 50,  'pip_value': 0.0001},
+    "EURUSD=X":   {'tp': 120, 'sl': 100, 'pip_value': 0.0001},
+    "GBPUSD=X":   {'tp': 150, 'sl': 125, 'pip_value': 0.0001},
+    "USDCAD=X":   {'tp': 100, 'sl': 60,  'pip_value': 0.0001},
+    "EURNZD=X":   {'tp': 120, 'sl': 100, 'pip_value': 0.0001},
 }
 
 SENT_LOG_FILE = "sent_signals.json"
@@ -78,13 +81,12 @@ def fetch_h4(symbol, days=10):
 
 # ================= STATE DETEKSI DARI DATA =================
 def check_existing_position(df, tp_pips, sl_pips, pip_value):
-    """Cek apakah ada posisi yang masih berjalan dari sinyal terbaru di data."""
     tp_price = tp_pips * pip_value
     sl_price = sl_pips * pip_value
 
     last_signal = df[df['Top'] | df['Bottom']].tail(1)
     if last_signal.empty:
-        return None  # Tidak ada sinyal sama sekali
+        return None
 
     row = last_signal.iloc[0]
     signal_type = 'Top' if row['Top'] else 'Bottom'
@@ -99,12 +101,11 @@ def check_existing_position(df, tp_pips, sl_pips, pip_value):
         sl = entry - sl_price
         order_type = 'Buy Stop'
 
-    # Cari candle setelah sinyal
     signal_idx = last_signal.index[0]
-    after = df.loc[signal_idx:].iloc[1:]  # setelah candle sinyal
+    after = df.loc[signal_idx:].iloc[1:]
 
     if after.empty:
-        return None  # Belum ada candle berikutnya
+        return None
 
     triggered = False
     close_outcome = None
@@ -138,7 +139,6 @@ def check_existing_position(df, tp_pips, sl_pips, pip_value):
                     break
 
     if triggered and close_outcome is None:
-        # Posisi masih berjalan
         return {
             'type': order_type,
             'entry': entry,
@@ -148,7 +148,6 @@ def check_existing_position(df, tp_pips, sl_pips, pip_value):
             'status': 'active'
         }
     elif triggered and close_outcome is not None:
-        # Posisi sudah close
         return {
             'type': order_type,
             'entry': entry,
@@ -160,7 +159,6 @@ def check_existing_position(df, tp_pips, sl_pips, pip_value):
             'close_time': str(close_time)
         }
     else:
-        # Entry belum tersulut (pending)
         return {
             'type': order_type,
             'entry': entry,
@@ -215,7 +213,7 @@ def scan_symbol(symbol):
         logging.warning(f"Data tidak cukup {symbol}")
         return
 
-    cfg = PAIR_CONFIG.get(symbol, PAIR_CONFIG["GC=F"])
+    cfg = PAIR_CONFIG.get(symbol, PAIR_CONFIG["EURUSD=X"])
     tp_pips = cfg['tp']
     sl_pips = cfg['sl']
     pip_value = cfg['pip_value']
@@ -232,7 +230,6 @@ def scan_symbol(symbol):
             logging.info(f"{symbol}: Pending order masih berlaku ({pos['type']}). Sinyal baru diabaikan.")
             return
         elif pos['status'] == 'closed':
-            # Kirim notifikasi close
             msg = (
                 f"✅ **POSISI CLOSE**\n"
                 f"Symbol: {symbol}\n"
