@@ -15,7 +15,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 SYMBOLS = [
-    "GC=F",
+    "GC=F",        # XAUUSD
     "USDJPY=X",
     "GBPJPY=X",
     "CHFJPY=X",
@@ -23,17 +23,28 @@ SYMBOLS = [
     "EURJPY=X",
     "CADJPY=X",
     "NZDJPY=X",
+    "EURUSD=X",
+    "GBPUSD=X",
+    "AUDUSD=X",
+    "NZDUSD=X",
 ]
 
 PAIR_CONFIG = {
-    "GC=F":       {'tp': 500, 'sl': 300, 'pip_value': 0.10},
+    # Grup Logam Mulia
+    "GC=F":       {'tp': 500, 'sl': 250, 'pip_value': 0.10},
+    # Grup Cross JPY
     "USDJPY=X":   {'tp': 80,  'sl': 75,  'pip_value': 0.01},
-    "GBPJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01},
+    "GBPJPY=X":   {'tp': 150, 'sl': 100, 'pip_value': 0.01},
     "CHFJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01},
     "AUDJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01},
     "EURJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01},
     "CADJPY=X":   {'tp': 100, 'sl': 40,  'pip_value': 0.01},
     "NZDJPY=X":   {'tp': 100, 'sl': 60,  'pip_value': 0.01},
+    # Grup Pair Mayor
+    "EURUSD=X":   {'tp': 175, 'sl': 100, 'pip_value': 0.0001},
+    "GBPUSD=X":   {'tp': 175, 'sl': 100, 'pip_value': 0.0001},
+    "AUDUSD=X":   {'tp': 100, 'sl': 75,  'pip_value': 0.0001},
+    "NZDUSD=X":   {'tp': 120, 'sl': 100, 'pip_value': 0.0001},
 }
 
 SENT_LOG_FILE = "sent_signals.json"
@@ -50,15 +61,15 @@ def detect_swings(df, left=3, right=3):
         h = df['High'].iloc[i]
         l = df['Low'].iloc[i]
         if (h > df['High'].iloc[i-left:i].values).all() and (h > df['High'].iloc[i+1:i+1+right].values).all():
-            df.at[df.index[i], 'Top'] = True
+            df.iat[i, df.columns.get_loc('Top')] = True
         if (l < df['Low'].iloc[i-left:i].values).all() and (l < df['Low'].iloc[i+1:i+1+right].values).all():
-            df.at[df.index[i], 'Bottom'] = True
+            df.iat[i, df.columns.get_loc('Bottom')] = True
     return df
 
-# ================= FETCH H4 (ringan, 2 hari) =================
+# ================= FETCH H4 =================
 def fetch_h4(symbol):
     try:
-        df = yf.download(symbol, period="2d", interval="1h", progress=False, timeout=30)
+        df = yf.download(symbol, period="2d", interval="1h", progress=False, timeout=30, auto_adjust=False)
         if df.empty:
             return None
         if isinstance(df.columns, pd.MultiIndex):
@@ -117,7 +128,7 @@ def send_telegram(msg, max_retries=3):
 def scan_symbol(symbol):
     logging.info(f"Scanning {symbol}...")
     df = fetch_h4(symbol)
-    if df is None or len(df) < 7:   # minimal 7 candle (3 kiri + sinyal + 3 kanan)
+    if df is None or len(df) < 7:
         logging.warning(f"Data tidak cukup {symbol}")
         return
 
@@ -128,7 +139,6 @@ def scan_symbol(symbol):
 
     df = detect_swings(df)
 
-    # Ambil candle terakhir yang sudah selesai (harusnya indeks ke-2 dari akhir)
     last_candle = df.iloc[-1]
     candle_end_time = last_candle.name
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -172,8 +182,6 @@ def scan_symbol(symbol):
     if send_telegram(msg):
         mark_signal_sent(symbol, signal_type, timestamp_str, sent_log)
         logging.info(f"{symbol}: Sinyal {order_type} dikirim.")
-    else:
-        logging.warning(f"{symbol}: Gagal mengirim sinyal.")
 
 def main():
     now_utc = datetime.now(timezone.utc)
@@ -186,7 +194,7 @@ def main():
     for sym in SYMBOLS:
         try:
             scan_symbol(sym)
-            time.sleep(1)   # lebih cepat
+            time.sleep(1)
         except Exception as e:
             logging.error(f"Error {sym}: {e}")
     elapsed = time.time() - start_time
