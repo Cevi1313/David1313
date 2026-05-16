@@ -15,6 +15,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 SYMBOLS = [
+    "GC=F",        # XAUUSD (EMA 20)
     "USDJPY=X", "GBPJPY=X", "CHFJPY=X", "AUDJPY=X",
     "EURJPY=X", "CADJPY=X", "NZDJPY=X",
     "AUDUSD=X", "EURGBP=X", "NZDUSD=X", "USDCHF=X",
@@ -22,21 +23,22 @@ SYMBOLS = [
 ]
 
 PAIR_CONFIG = {
-    "USDJPY=X":   {'tp': 80,  'sl': 75,  'pip_value': 0.01},
-    "GBPJPY=X":   {'tp': 150, 'sl': 100, 'pip_value': 0.01},
-    "CHFJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01},
-    "AUDJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01},
-    "EURJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01},
-    "CADJPY=X":   {'tp': 100, 'sl': 40,  'pip_value': 0.01},
-    "NZDJPY=X":   {'tp': 100, 'sl': 60,  'pip_value': 0.01},
-    "AUDUSD=X":   {'tp': 100, 'sl': 75,  'pip_value': 0.0001},
-    "EURGBP=X":   {'tp': 80,  'sl': 75,  'pip_value': 0.0001},
-    "NZDUSD=X":   {'tp': 120, 'sl': 100, 'pip_value': 0.0001},
-    "USDCHF=X":   {'tp': 80,  'sl': 50,  'pip_value': 0.0001},
-    "EURUSD=X":   {'tp': 120, 'sl': 100, 'pip_value': 0.0001},
-    "GBPUSD=X":   {'tp': 150, 'sl': 125, 'pip_value': 0.0001},
-    "USDCAD=X":   {'tp': 100, 'sl': 60,  'pip_value': 0.0001},
-    "EURNZD=X":   {'tp': 120, 'sl': 100, 'pip_value': 0.0001},
+    "GC=F":       {'tp': 500, 'sl': 300, 'pip_value': 0.10, 'swing': 11, 'ema': 20},
+    "USDJPY=X":   {'tp': 80,  'sl': 75,  'pip_value': 0.01, 'swing': 7, 'ema': None},
+    "GBPJPY=X":   {'tp': 150, 'sl': 100, 'pip_value': 0.01, 'swing': 7, 'ema': None},
+    "CHFJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01, 'swing': 7, 'ema': None},
+    "AUDJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01, 'swing': 7, 'ema': None},
+    "EURJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01, 'swing': 7, 'ema': None},
+    "CADJPY=X":   {'tp': 100, 'sl': 40,  'pip_value': 0.01, 'swing': 7, 'ema': None},
+    "NZDJPY=X":   {'tp': 100, 'sl': 60,  'pip_value': 0.01, 'swing': 7, 'ema': None},
+    "AUDUSD=X":   {'tp': 100, 'sl': 75,  'pip_value': 0.0001, 'swing': 7, 'ema': None},
+    "EURGBP=X":   {'tp': 80,  'sl': 75,  'pip_value': 0.0001, 'swing': 7, 'ema': None},
+    "NZDUSD=X":   {'tp': 120, 'sl': 100, 'pip_value': 0.0001, 'swing': 7, 'ema': None},
+    "USDCHF=X":   {'tp': 80,  'sl': 50,  'pip_value': 0.0001, 'swing': 7, 'ema': None},
+    "EURUSD=X":   {'tp': 120, 'sl': 100, 'pip_value': 0.0001, 'swing': 7, 'ema': None},
+    "GBPUSD=X":   {'tp': 150, 'sl': 125, 'pip_value': 0.0001, 'swing': 7, 'ema': None},
+    "USDCAD=X":   {'tp': 100, 'sl': 60,  'pip_value': 0.0001, 'swing': 7, 'ema': None},
+    "EURNZD=X":   {'tp': 120, 'sl': 100, 'pip_value': 0.0001, 'swing': 7, 'ema': None},
 }
 
 SENT_LOG_FILE = "sent_signals.json"
@@ -109,64 +111,34 @@ def check_existing_position(df, tp_pips, sl_pips, pip_value):
 
     triggered = False
     close_outcome = None
-    close_time = None
-
     for t, frow in after.iterrows():
         if not triggered:
             if order_type == 'Buy Stop' and frow['High'] >= entry:
                 triggered = True
             elif order_type == 'Sell Stop' and frow['Low'] <= entry:
                 triggered = True
-
         if triggered:
             if order_type == 'Buy Stop':
                 if frow['High'] >= tp:
                     close_outcome = 'TP'
-                    close_time = t
                     break
                 if frow['Low'] <= sl:
                     close_outcome = 'SL'
-                    close_time = t
                     break
             else:
                 if frow['Low'] <= tp:
                     close_outcome = 'TP'
-                    close_time = t
                     break
                 if frow['High'] >= sl:
                     close_outcome = 'SL'
-                    close_time = t
                     break
 
     if triggered and close_outcome is None:
-        return {
-            'type': order_type,
-            'entry': entry,
-            'tp': tp,
-            'sl': sl,
-            'signal_time': str(signal_idx),
-            'status': 'active'
-        }
+        return {'status': 'active', 'type': order_type, 'entry': entry, 'tp': tp, 'sl': sl}
     elif triggered and close_outcome is not None:
-        return {
-            'type': order_type,
-            'entry': entry,
-            'tp': tp,
-            'sl': sl,
-            'signal_time': str(signal_idx),
-            'status': 'closed',
-            'outcome': close_outcome,
-            'close_time': str(close_time)
-        }
+        return {'status': 'closed', 'outcome': close_outcome, 'type': order_type, 'entry': entry, 'tp': tp, 'sl': sl}
     else:
-        return {
-            'type': order_type,
-            'entry': entry,
-            'tp': tp,
-            'sl': sl,
-            'signal_time': str(signal_idx),
-            'status': 'pending'
-        }
+        return {'status': 'pending', 'type': order_type, 'entry': entry, 'tp': tp, 'sl': sl}
 
 # ================= LOG SINYAL TERKIRIM =================
 def load_sent_log():
@@ -213,12 +185,23 @@ def scan_symbol(symbol):
         logging.warning(f"Data tidak cukup {symbol}")
         return
 
-    cfg = PAIR_CONFIG.get(symbol, PAIR_CONFIG["EURUSD=X"])
+    cfg = PAIR_CONFIG[symbol]
     tp_pips = cfg['tp']
     sl_pips = cfg['sl']
     pip_value = cfg['pip_value']
+    swing_n = cfg['swing']
+    ema_period = cfg['ema']
 
-    df = detect_swings(df)
+    # Deteksi swing
+    if swing_n == 11:
+        df = detect_swings(df, left=5, right=5)
+    else:
+        df = detect_swings(df, left=3, right=3)
+
+    # Filter EMA jika ada
+    if ema_period:
+        df['EMA'] = df['Close'].ewm(span=ema_period, adjust=False).mean()
+        df = df[(df['Top'] & (df['Close'] < df['EMA'])) | (df['Bottom'] & (df['Close'] > df['EMA']))]
 
     # --- Stateful Check ---
     pos = check_existing_position(df, tp_pips, sl_pips, pip_value)
@@ -235,6 +218,8 @@ def scan_symbol(symbol):
                 f"Symbol: {symbol}\n"
                 f"Order: {pos['type']}\n"
                 f"Entry: {pos['entry']:.5f}\n"
+                f"TP: {pos['tp']:.5f} ({tp_pips} pip)\n"
+                f"SL: {pos['sl']:.5f} ({sl_pips} pip)\n"
                 f"Close: {pos['outcome']} {'✅' if pos['outcome'] == 'TP' else '❌'}\n"
                 f"Waktu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             )
@@ -279,6 +264,7 @@ def scan_symbol(symbol):
         f"Order: {order_type} di {entry:.5f}\n"
         f"TP: {tp:.5f} ({tp_pips} pip)\n"
         f"SL: {sl:.5f} ({sl_pips} pip)\n"
+        f"Filter: {'EMA ' + str(ema_period) if ema_period else 'Tanpa Filter'}\n"
         f"Candle close: {candle_end_time}\n"
         f"Waktu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     )
