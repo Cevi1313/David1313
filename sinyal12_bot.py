@@ -16,23 +16,13 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 SYMBOLS = [
     "GC=F",        # XAUUSD
-    "USDJPY=X",
-    "GBPJPY=X",
-    "CHFJPY=X",
-    "AUDJPY=X",
-    "EURJPY=X",
-    "CADJPY=X",
-    "NZDJPY=X",
-    "EURUSD=X",
-    "GBPUSD=X",
-    "AUDUSD=X",
-    "NZDUSD=X",
+    "USDJPY=X", "GBPJPY=X", "CHFJPY=X", "AUDJPY=X",
+    "EURJPY=X", "CADJPY=X", "NZDJPY=X",
+    "AUDUSD=X", "EURGBP=X", "NZDUSD=X", "USDCHF=X",
 ]
 
 PAIR_CONFIG = {
-    # Grup Logam Mulia
     "GC=F":       {'tp': 500, 'sl': 250, 'pip_value': 0.10},
-    # Grup Cross JPY
     "USDJPY=X":   {'tp': 80,  'sl': 75,  'pip_value': 0.01},
     "GBPJPY=X":   {'tp': 150, 'sl': 100, 'pip_value': 0.01},
     "CHFJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01},
@@ -40,11 +30,10 @@ PAIR_CONFIG = {
     "EURJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01},
     "CADJPY=X":   {'tp': 100, 'sl': 40,  'pip_value': 0.01},
     "NZDJPY=X":   {'tp': 100, 'sl': 60,  'pip_value': 0.01},
-    # Grup Pair Mayor
-    "EURUSD=X":   {'tp': 175, 'sl': 100, 'pip_value': 0.0001},
-    "GBPUSD=X":   {'tp': 175, 'sl': 100, 'pip_value': 0.0001},
     "AUDUSD=X":   {'tp': 100, 'sl': 75,  'pip_value': 0.0001},
+    "EURGBP=X":   {'tp': 80,  'sl': 75,  'pip_value': 0.0001},
     "NZDUSD=X":   {'tp': 120, 'sl': 100, 'pip_value': 0.0001},
+    "USDCHF=X":   {'tp': 80,  'sl': 50,  'pip_value': 0.0001},
 }
 
 SENT_LOG_FILE = "sent_signals.json"
@@ -52,7 +41,7 @@ SENT_LOG_FILE = "sent_signals.json"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 bot = Bot(token=TELEGRAM_TOKEN)
 
-# ================= DETEKSI SWING =================
+# ================= FUNGSI DETEKSI SWING =================
 def detect_swings(df, left=3, right=3):
     df = df.copy()
     df['Top'] = False
@@ -66,10 +55,10 @@ def detect_swings(df, left=3, right=3):
             df.iat[i, df.columns.get_loc('Bottom')] = True
     return df
 
-# ================= FETCH H4 =================
-def fetch_h4(symbol):
+# ================= FETCH DATA H4 =================
+def fetch_h4(symbol, days=10):
     try:
-        df = yf.download(symbol, period="2d", interval="1h", progress=False, timeout=30, auto_adjust=False)
+        df = yf.download(symbol, period=f"{days}d", interval="1h", progress=False, timeout=60)
         if df.empty:
             return None
         if isinstance(df.columns, pd.MultiIndex):
@@ -86,6 +75,100 @@ def fetch_h4(symbol):
     except Exception as e:
         logging.error(f"Fetch error {symbol}: {e}")
         return None
+
+# ================= STATE DETEKSI DARI DATA =================
+def check_existing_position(df, tp_pips, sl_pips, pip_value):
+    """Cek apakah ada posisi yang masih berjalan dari sinyal terbaru di data."""
+    tp_price = tp_pips * pip_value
+    sl_price = sl_pips * pip_value
+
+    last_signal = df[df['Top'] | df['Bottom']].tail(1)
+    if last_signal.empty:
+        return None  # Tidak ada sinyal sama sekali
+
+    row = last_signal.iloc[0]
+    signal_type = 'Top' if row['Top'] else 'Bottom'
+    if signal_type == 'Top':
+        entry = row['Low']
+        tp = entry - tp_price
+        sl = entry + sl_price
+        order_type = 'Sell Stop'
+    else:
+        entry = row['High']
+        tp = entry + tp_price
+        sl = entry - sl_price
+        order_type = 'Buy Stop'
+
+    # Cari candle setelah sinyal
+    signal_idx = last_signal.index[0]
+    after = df.loc[signal_idx:].iloc[1:]  # setelah candle sinyal
+
+    if after.empty:
+        return None  # Belum ada candle berikutnya
+
+    triggered = False
+    close_outcome = None
+    close_time = None
+
+    for t, frow in after.iterrows():
+        if not triggered:
+            if order_type == 'Buy Stop' and frow['High'] >= entry:
+                triggered = True
+            elif order_type == 'Sell Stop' and frow['Low'] <= entry:
+                triggered = True
+
+        if triggered:
+            if order_type == 'Buy Stop':
+                if frow['High'] >= tp:
+                    close_outcome = 'TP'
+                    close_time = t
+                    break
+                if frow['Low'] <= sl:
+                    close_outcome = 'SL'
+                    close_time = t
+                    break
+            else:
+                if frow['Low'] <= tp:
+                    close_outcome = 'TP'
+                    close_time = t
+                    break
+                if frow['High'] >= sl:
+                    close_outcome = 'SL'
+                    close_time = t
+                    break
+
+    if triggered and close_outcome is None:
+        # Posisi masih berjalan
+        return {
+            'type': order_type,
+            'entry': entry,
+            'tp': tp,
+            'sl': sl,
+            'signal_time': str(signal_idx),
+            'status': 'active'
+        }
+    elif triggered and close_outcome is not None:
+        # Posisi sudah close
+        return {
+            'type': order_type,
+            'entry': entry,
+            'tp': tp,
+            'sl': sl,
+            'signal_time': str(signal_idx),
+            'status': 'closed',
+            'outcome': close_outcome,
+            'close_time': str(close_time)
+        }
+    else:
+        # Entry belum tersulut (pending)
+        return {
+            'type': order_type,
+            'entry': entry,
+            'tp': tp,
+            'sl': sl,
+            'signal_time': str(signal_idx),
+            'status': 'pending'
+        }
 
 # ================= LOG SINYAL TERKIRIM =================
 def load_sent_log():
@@ -128,7 +211,7 @@ def send_telegram(msg, max_retries=3):
 def scan_symbol(symbol):
     logging.info(f"Scanning {symbol}...")
     df = fetch_h4(symbol)
-    if df is None or len(df) < 7:
+    if df is None or len(df) < 100:
         logging.warning(f"Data tidak cukup {symbol}")
         return
 
@@ -139,6 +222,29 @@ def scan_symbol(symbol):
 
     df = detect_swings(df)
 
+    # --- Stateful Check ---
+    pos = check_existing_position(df, tp_pips, sl_pips, pip_value)
+    if pos:
+        if pos['status'] == 'active':
+            logging.info(f"{symbol}: Posisi masih aktif ({pos['type']}). Sinyal baru diabaikan.")
+            return
+        elif pos['status'] == 'pending':
+            logging.info(f"{symbol}: Pending order masih berlaku ({pos['type']}). Sinyal baru diabaikan.")
+            return
+        elif pos['status'] == 'closed':
+            # Kirim notifikasi close
+            msg = (
+                f"✅ **POSISI CLOSE**\n"
+                f"Symbol: {symbol}\n"
+                f"Order: {pos['type']}\n"
+                f"Entry: {pos['entry']:.5f}\n"
+                f"Close: {pos['outcome']} {'✅' if pos['outcome'] == 'TP' else '❌'}\n"
+                f"Waktu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+            send_telegram(msg)
+            logging.info(f"{symbol}: Posisi closed ({pos['outcome']}). Mengizinkan sinyal baru.")
+
+    # --- Deteksi sinyal baru ---
     last_candle = df.iloc[-1]
     candle_end_time = last_candle.name
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
