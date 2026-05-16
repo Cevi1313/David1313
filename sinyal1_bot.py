@@ -5,7 +5,8 @@ import numpy as np
 import logging
 import time
 import json
-from datetime import datetime, timedelta
+import hashlib
+from datetime import datetime, timedelta, timezone
 from telegram import Bot
 from telegram.error import TelegramError, TimedOut, RetryAfter
 
@@ -14,23 +15,25 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 SYMBOLS = [
-    "GC=F",
+    "GC=F",        # XAUUSD
     "USDJPY=X",
-    "NZDJPY=X",
+    "GBPJPY=X",
     "CHFJPY=X",
-    "USDCAD=X",
+    "AUDJPY=X",
+    "EURJPY=X",
     "CADJPY=X",
-    "AUDJPY=X"
+    "NZDJPY=X",
 ]
 
-PARAMS = {
-    "GC=F":     {'lb': (120, 240), 'adx': 12, 'cap': None, 'ts': 20},
-    "USDJPY=X": {'lb': (60, 120),  'adx': 16, 'cap': 500,  'ts': None},
-    "NZDJPY=X": {'lb': (80, 160),  'adx': 12, 'cap': None, 'ts': 20},
-    "CHFJPY=X": {'lb': (80, 160),  'adx': 12, 'cap': None, 'ts': 20},
-    "USDCAD=X": {'lb': (80, 160),  'adx': 12, 'cap': None, 'ts': 20},
-    "CADJPY=X": {'lb': (80, 160),  'adx': 12, 'cap': None, 'ts': 20},
-    "AUDJPY=X": {'lb': (80, 160),  'adx': 12, 'cap': None, 'ts': 20},
+PAIR_CONFIG = {
+    "GC=F":       {'tp': 500, 'sl': 300, 'pip_value': 0.10},
+    "USDJPY=X":   {'tp': 80,  'sl': 75,  'pip_value': 0.01},
+    "GBPJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01},
+    "CHFJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01},
+    "AUDJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01},
+    "EURJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01},
+    "CADJPY=X":   {'tp': 100, 'sl': 40,  'pip_value': 0.01},
+    "NZDJPY=X":   {'tp': 100, 'sl': 60,  'pip_value': 0.01},
 }
 
 STATE_FILE = "trading_state.json"
@@ -38,20 +41,24 @@ STATE_FILE = "trading_state.json"
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 bot = Bot(token=TELEGRAM_TOKEN)
 
-def get_pip_size(symbol):
-    if 'JPY' in symbol:
-        return 0.01
-    elif 'GC' in symbol:
-        return 0.01
-    else:
-        return 0.0001
+# ================= FUNGSI DETEKSI SWING =================
+def detect_swings(df, left=3, right=3):
+    df = df.copy()
+    df['Top'] = False
+    df['Bottom'] = False
+    for i in range(left, len(df) - right):
+        h = df['High'].iloc[i]
+        l = df['Low'].iloc[i]
+        if (h > df['High'].iloc[i-left:i].values).all() and (h > df['High'].iloc[i+1:i+1+right].values).all():
+            df.at[df.index[i], 'Top'] = True
+        if (l < df['Low'].iloc[i-left:i].values).all() and (l < df['Low'].iloc[i+1:i+1+right].values).all():
+            df.at[df.index[i], 'Bottom'] = True
+    return df
 
-def price_to_pip(symbol, distance):
-    return distance / get_pip_size(symbol)
-
-def fetch_h4(symbol, days=30):
+# ================= FETCH DATA H4 =================
+def fetch_h4(symbol):
     try:
-        df = yf.download(symbol, period=f"{days}d", interval="1h", progress=False, timeout=30)
+        df = yf.download(symbol, period="5d", interval="1h", progress=False, timeout=30)
         if df.empty:
             return None
         if isinstance(df.columns, pd.MultiIndex):
@@ -69,121 +76,7 @@ def fetch_h4(symbol, days=30):
         logging.error(f"Fetch error {symbol}: {e}")
         return None
 
-def calc_sr(window):
-    h = window['High'].values
-    l = window['Low'].values
-    sh, sl = [], []
-    for j in range(2, len(window)-2):
-        if h[j] > h[j-1] and h[j] > h[j-2] and h[j] > h[j+1] and h[j] > h[j+2]:
-            sh.append(h[j])
-        if l[j] < l[j-1] and l[j] < l[j-2] and l[j] < l[j+1] and l[j] < l[j+2]:
-            sl.append(l[j])
-    if not sh or not sl:
-        return np.nan, np.nan
-    return np.mean(sorted(sl)[:3]), np.mean(sorted(sh)[-3:])
-
-def get_support_resistance(df4, lb_short, lb_long):
-    support = pd.Series(np.nan, index=df4.index)
-    resistance = pd.Series(np.nan, index=df4.index)
-    for i in range(lb_long, len(df4)):
-        w_short = df4.iloc[i-lb_short:i]
-        w_long = df4.iloc[i-lb_long:i]
-        sup_s, res_s = calc_sr(w_short)
-        sup_l, res_l = calc_sr(w_long)
-        support.iloc[i] = np.nanmax([sup_s, sup_l])
-        resistance.iloc[i] = np.nanmin([res_s, res_l])
-    support.ffill(inplace=True)
-    resistance.ffill(inplace=True)
-    return support, resistance
-
-def calculate_indicators(df4):
-    close = df4['Close']
-    high = df4['High']
-    low = df4['Low']
-    tr = np.maximum(high-low, np.maximum(abs(high-close.shift()), abs(low-close.shift())))
-    atr14 = tr.ewm(alpha=1/14, adjust=False).mean()
-    plus_dm = high.diff().clip(lower=0)
-    minus_dm = low.diff().multiply(-1).clip(lower=0)
-    atr_dx = tr.ewm(alpha=1/14, adjust=False).mean()
-    plus_di = 100 * (plus_dm.ewm(alpha=1/14, adjust=False).mean() / atr_dx)
-    minus_di = 100 * (minus_dm.ewm(alpha=1/14, adjust=False).mean() / atr_dx)
-    dx = 100 * (abs(plus_di - minus_di) / (plus_di + minus_di))
-    adx = dx.ewm(alpha=1/14, adjust=False).mean()
-    return {'close':close, 'high':high, 'low':low, 'open':df4['Open'],
-            'atr14':atr14, 'adx':adx}
-
-def detect_signals(df4, ind, support, resistance, symbol):
-    cfg = PARAMS.get(symbol, PARAMS["AUDJPY=X"])
-    adx_th = cfg['adx']
-    cap_pips = cfg['cap']
-    time_stop = cfg['ts']
-    
-    close = ind['close']
-    high = ind['high']
-    low = ind['low']
-    open_ = ind['open']
-    atr14 = ind['atr14']
-    adx = ind['adx']
-
-    strong = adx > adx_th
-    min_range = atr14 * 1.5
-    atr_buf = atr14 * 1.5
-    bullish = close > open_
-    bearish = close < open_
-
-    buy_break = (close > resistance) & strong & ((resistance - support) >= min_range)
-    sell_break = (close < support) & strong & ((resistance - support) >= min_range)
-    buy_bounce = (low <= support + atr_buf) & (close > support) & bullish & strong & ((resistance - support) >= min_range)
-    sell_bounce = (high >= resistance - atr_buf) & (close < resistance) & bearish & strong & ((resistance - support) >= min_range)
-
-    buy_sig = buy_break | buy_bounce
-    sell_sig = sell_break | sell_bounce
-
-    if not (buy_sig.iloc[-1] or sell_sig.iloc[-1]):
-        return []
-
-    entry = close.iloc[-1]
-    atr_val = atr14.iloc[-1]
-    if pd.isna(atr_val) or atr_val == 0:
-        return []
-
-    sl_dist = 1.5 * atr_val
-    tp_dist = 2.5 * atr_val
-    pip_size = get_pip_size(symbol)
-    if cap_pips:
-        max_dist = cap_pips * pip_size
-        sl_dist = min(sl_dist, max_dist)
-        tp_dist = min(tp_dist, max_dist)
-
-    signals = []
-    if buy_sig.iloc[-1]:
-        signals.append({
-            'type': 'BUY',
-            'entry': round(entry, 5),
-            'sl': round(entry - sl_dist, 5),
-            'tp': round(entry + tp_dist, 5),
-            'sl_pip': round(price_to_pip(symbol, sl_dist), 1),
-            'tp_pip': round(price_to_pip(symbol, tp_dist), 1),
-            'rr': round(tp_dist/sl_dist, 2) if sl_dist > 0 else 0,
-            'support': round(support.iloc[-1], 5),
-            'resistance': round(resistance.iloc[-1], 5),
-            'time_stop': time_stop
-        })
-    if sell_sig.iloc[-1]:
-        signals.append({
-            'type': 'SELL',
-            'entry': round(entry, 5),
-            'sl': round(entry + sl_dist, 5),
-            'tp': round(entry - tp_dist, 5),
-            'sl_pip': round(price_to_pip(symbol, sl_dist), 1),
-            'tp_pip': round(price_to_pip(symbol, tp_dist), 1),
-            'rr': round(tp_dist/sl_dist, 2) if sl_dist > 0 else 0,
-            'support': round(support.iloc[-1], 5),
-            'resistance': round(resistance.iloc[-1], 5),
-            'time_stop': time_stop
-        })
-    return signals
-
+# ================= STATE FILE =================
 def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, 'r') as f:
@@ -194,9 +87,13 @@ def save_state(state):
     with open(STATE_FILE, 'w') as f:
         json.dump(state, f, indent=2)
 
-def is_duplicate(symbol, sig):
-    state = load_state()
-    key = f"{symbol}_{sig['type']}_{sig['support']}_{sig['resistance']}"
+# ================= ANTI DUPLIKAT SIGNAL =================
+def generate_signal_hash(symbol, sig_type, timestamp):
+    raw = f"{symbol}_{sig_type}_{timestamp}"
+    return hashlib.md5(raw.encode()).hexdigest()
+
+def is_duplicate(symbol, sig_type, timestamp, state):
+    key = generate_signal_hash(symbol, sig_type, timestamp)
     last = state.get(key)
     if last:
         last_time = datetime.fromisoformat(last)
@@ -204,80 +101,154 @@ def is_duplicate(symbol, sig):
             return True
     return False
 
-def mark_sent(symbol, sig):
-    state = load_state()
-    key = f"{symbol}_{sig['type']}_{sig['support']}_{sig['resistance']}"
+def mark_sent(symbol, sig_type, timestamp, state):
+    key = generate_signal_hash(symbol, sig_type, timestamp)
     state[key] = datetime.now().isoformat()
     save_state(state)
 
-# ============= PERBAIKAN UTAMA =============
-def kirim_telegram(pesan, max_retries=3):
-    """Kirim pesan ke Telegram dengan retry mekanisme (maks 3 kali, jeda eksponensial)"""
+# ================= CLEAR POSISI OTOMATIS =================
+def check_and_clear_position(symbol, df, state):
+    pos = state.get(f"position_{symbol}")
+    if not pos:
+        return None
+
+    signal_time = pd.Timestamp(pos['signal_time'])
+    mask = df.index > signal_time
+    if not mask.any():
+        return pos
+
+    after_df = df.loc[mask]
+    entry = pos['entry']
+    tp = pos['tp']
+    sl = pos['sl']
+    order_type = pos['type']
+
+    if order_type == 'Buy Stop':
+        hit_tp = (after_df['High'] >= tp).any()
+        hit_sl = (after_df['Low'] <= sl).any()
+    else:
+        hit_tp = (after_df['Low'] <= tp).any()
+        hit_sl = (after_df['High'] >= sl).any()
+
+    if hit_tp or hit_sl:
+        outcome = 'TP' if hit_tp else 'SL'
+        msg = (
+            f"✅ **POSISI CLOSE**\n"
+            f"Symbol: {symbol}\n"
+            f"Order: {order_type}\n"
+            f"Entry: {entry:.5f}\n"
+            f"Close: {outcome} {'✅' if outcome == 'TP' else '❌'}\n"
+            f"Waktu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        send_telegram(msg)
+        del state[f"position_{symbol}"]
+        save_state(state)
+        logging.info(f"{symbol}: Posisi {order_type} closed ({outcome}) dan dihapus.")
+        return None
+    else:
+        return pos
+
+def save_position(symbol, pos_data, state):
+    state[f"position_{symbol}"] = pos_data
+    save_state(state)
+
+# ================= KIRIM TELEGRAM =================
+def send_telegram(msg, max_retries=3):
     for attempt in range(max_retries):
         try:
-            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=pesan, timeout=10)
-            logging.info(f"✅ Notifikasi terkirim (percobaan ke-{attempt+1})")
+            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg, timeout=10)
+            logging.info("✅ Notifikasi terkirim")
             return True
         except (TimedOut, RetryAfter, TelegramError) as e:
-            wait = 2 ** attempt  # 1, 2, 4 detik
-            logging.warning(f"Telegram error (attempt {attempt+1}/{max_retries}): {e}. Retry dalam {wait} detik")
+            wait = 2 ** attempt
+            logging.warning(f"Telegram error, retry {attempt+1}/{max_retries}: {e}")
             time.sleep(wait)
         except Exception as e:
-            logging.error(f"Error umum di kirim_telegram: {e}")
+            logging.error(f"Error umum telegram: {e}")
             break
-    logging.error("❌ Gagal mengirim pesan ke Telegram setelah beberapa percobaan")
+    logging.error("❌ Gagal kirim pesan ke Telegram")
     return False
 
-def send_alert(symbol, signal):
-    ts = signal['time_stop']
-    ts_str = f"{ts} bar H4" if ts else "Tidak ada"
-    msg = (
-        f"🔔 **SINYAL TRADING**\n"
-        f"Symbol: {symbol}\n"
-        f"Signal: {signal['type']}\n"
-        f"Entry: {signal['entry']}\n"
-        f"SL: {signal['sl']} ({signal['sl_pip']} pip)\n"
-        f"TP: {signal['tp']} ({signal['tp_pip']} pip)\n"
-        f"RR: 1:{signal['rr']}\n"
-        f"Support: {signal['support']} | Resistance: {signal['resistance']}\n"
-        f"Time Stop: {ts_str}\n"
-        f"Waktu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    )
-    success = kirim_telegram(msg)
-    return success
-
+# ================= MAIN SCAN =================
 def scan_symbol(symbol):
     logging.info(f"Scanning {symbol}...")
-    df4 = fetch_h4(symbol, days=30)
-    if df4 is None or len(df4) < 160:
+    df = fetch_h4(symbol)
+    if df is None or len(df) < 100:
         logging.warning(f"Data tidak cukup {symbol}")
         return
-    cfg = PARAMS.get(symbol, PARAMS["AUDJPY=X"])
-    lb_short, lb_long = cfg['lb']
-    support, resistance = get_support_resistance(df4, lb_short, lb_long)
-    if pd.isna(support.iloc[-1]) or pd.isna(resistance.iloc[-1]):
-        logging.warning(f"S/R invalid {symbol}")
+
+    state = load_state()
+
+    open_pos = check_and_clear_position(symbol, df, state)
+    if open_pos:
+        logging.info(f"{symbol}: Posisi masih berjalan ({open_pos['type']}). Sinyal baru diabaikan.")
         return
-    ind = calculate_indicators(df4)
-    if pd.isna(ind['adx'].iloc[-1]):
-        logging.warning(f"Indikator tidak lengkap {symbol}")
+
+    cfg = PAIR_CONFIG.get(symbol, PAIR_CONFIG["GC=F"])
+    tp_pips = cfg['tp']
+    sl_pips = cfg['sl']
+    pip_value = cfg['pip_value']
+
+    df = detect_swings(df)
+
+    last_candle = df.iloc[-1]
+    candle_end_time = last_candle.name
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    if now_utc < candle_end_time:
+        logging.info(f"Candle {symbol} belum selesai, tunda.")
         return
-    signals = detect_signals(df4, ind, support, resistance, symbol)
-    if signals:
-        for sig in signals:
-            if is_duplicate(symbol, sig):
-                logging.info(f"{symbol}: Duplicate ignored (sudah dikirim dalam 24 jam)")
-                continue
-            # Kirim dulu, baru tandai sebagai terkirim jika sukses
-            if send_alert(symbol, sig):
-                mark_sent(symbol, sig)
-                logging.info(f"{symbol}: Signal {sig['type']} terkirim")
-            else:
-                logging.warning(f"{symbol}: Signal {sig['type']} gagal dikirim, tidak ditandai duplicate -> akan dicoba di run berikutnya")
+
+    if not (last_candle['Top'] or last_candle['Bottom']):
+        logging.info(f"{symbol}: Tidak ada sinyal.")
+        return
+
+    signal_type = 'Top' if last_candle['Top'] else 'Bottom'
+    timestamp_str = str(candle_end_time)
+
+    if is_duplicate(symbol, signal_type, timestamp_str, state):
+        logging.info(f"{symbol}: Sinyal sudah dikirim.")
+        return
+
+    if signal_type == 'Top':
+        entry = last_candle['Low']
+        tp = entry - tp_pips * pip_value
+        sl = entry + sl_pips * pip_value
+        order_type = 'Sell Stop'
     else:
-        logging.info(f"{symbol}: No signal")
+        entry = last_candle['High']
+        tp = entry + tp_pips * pip_value
+        sl = entry - sl_pips * pip_value
+        order_type = 'Buy Stop'
+
+    msg = (
+        f"🔔 **SINYAL REVERSAL**\n"
+        f"Symbol: {symbol}\n"
+        f"Signal: {signal_type}\n"
+        f"Order: {order_type} di {entry:.5f}\n"
+        f"TP: {tp:.5f} ({tp_pips} pip)\n"
+        f"SL: {sl:.5f} ({sl_pips} pip)\n"
+        f"Candle close: {candle_end_time}\n"
+        f"Waktu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+    if send_telegram(msg):
+        mark_sent(symbol, signal_type, timestamp_str, state)
+        save_position(symbol, {
+            'type': order_type,
+            'entry': entry,
+            'tp': tp,
+            'sl': sl,
+            'signal_time': timestamp_str
+        }, state)
+        logging.info(f"{symbol}: {order_type} terpasang di {entry:.5f}")
 
 def main():
+    # Cek hari – jangan jalankan di Sabtu/Minggu (UTC)
+    now_utc = datetime.now(timezone.utc)
+    weekday = now_utc.weekday()
+    if weekday >= 5:
+        logging.info("Hari Sabtu/Minggu – pasar libur, scan dihentikan.")
+        return
+
     logging.info("=== SCAN DIMULAI ===")
     start_time = time.time()
     for sym in SYMBOLS:
