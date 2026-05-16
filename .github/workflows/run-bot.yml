@@ -2,20 +2,20 @@ name: Run Forex Bot
 
 on:
   schedule:
-    - cron: '0 */2 * * *'   # setiap 2 jam
-  workflow_dispatch:         # supaya bisa dijalankan manual untuk tes
+    - cron: '*/5 * * * 1-5'   # setiap 5 menit, Senin-Jumat
+  workflow_dispatch:
 
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6          # ✅ v4 → v6
+      - uses: actions/checkout@v4
       - name: Setup Python
-        uses: actions/setup-python@v6      # ✅ v5 → v6
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install dependencies
-        run: pip install yfinance pandas numpy requests schedule python-telegram-bot==13.15
+        run: pip install yfinance pandas numpy python-telegram-bot
       - name: Run bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
