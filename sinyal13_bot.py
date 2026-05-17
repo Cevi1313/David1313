@@ -16,16 +16,19 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 SYMBOLS = [
     "GC=F",        # XAUUSD (30 candle, tanpa EMA)
-    "USDJPY=X", "GBPJPY=X", "CHFJPY=X", "AUDJPY=X",
+    "GBPJPY=X",    # GBP/JPY (30 candle, tanpa EMA)
+    "USDJPY=X", "CHFJPY=X", "AUDJPY=X",
     "EURJPY=X", "CADJPY=X", "NZDJPY=X",
     "AUDUSD=X", "EURGBP=X", "NZDUSD=X", "USDCHF=X",
     "EURUSD=X", "GBPUSD=X", "USDCAD=X", "EURNZD=X",
 ]
 
 PAIR_CONFIG = {
+    # XAUUSD & GBP/JPY dengan 30 candle
     "GC=F":       {'tp': 500, 'sl': 400, 'pip_value': 0.10, 'swing': 30, 'ema': None},
+    "GBPJPY=X":   {'tp': 200, 'sl': 100, 'pip_value': 0.01, 'swing': 30, 'ema': None},
+    # 14 pair lainnya dengan 7 candle
     "USDJPY=X":   {'tp': 80,  'sl': 75,  'pip_value': 0.01, 'swing': 7, 'ema': None},
-    "GBPJPY=X":   {'tp': 150, 'sl': 100, 'pip_value': 0.01, 'swing': 7, 'ema': None},
     "CHFJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01, 'swing': 7, 'ema': None},
     "AUDJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01, 'swing': 7, 'ema': None},
     "EURJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01, 'swing': 7, 'ema': None},
@@ -198,7 +201,6 @@ def scan_symbol(symbol):
     elif swing_n == 7:
         df = detect_swings(df, left=3, right=3)
     else:
-        # fallback untuk aturan lain (misal 11 candle)
         df = detect_swings(df, left=5, right=5)
 
     # Filter EMA hanya jika diaktifkan
