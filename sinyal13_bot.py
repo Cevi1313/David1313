@@ -15,33 +15,17 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 SYMBOLS = [
-    "GC=F",        # XAUUSD (30 candle, tanpa EMA)
-    "GBPJPY=X",    # GBP/JPY (30 candle, tanpa EMA)
-    "USDJPY=X", "CHFJPY=X", "AUDJPY=X",
-    "EURJPY=X", "CADJPY=X", "NZDJPY=X",
-    "AUDUSD=X", "EURGBP=X", "NZDUSD=X", "USDCHF=X",
-    "EURUSD=X", "GBPUSD=X", "USDCAD=X", "EURNZD=X",
+    "GC=F",        # XAUUSD (30 candle, TP 500, SL 400)
+    "GBPJPY=X",    # GBP/JPY (30 candle, TP 200, SL 100)
+    "USDJPY=X",    # USD/JPY (30 candle, TP 200, SL 100)
+    "AUDUSD=X",    # AUD/USD (30 candle, TP 200, SL 125)
 ]
 
 PAIR_CONFIG = {
-    # XAUUSD & GBP/JPY dengan 30 candle
     "GC=F":       {'tp': 500, 'sl': 400, 'pip_value': 0.10, 'swing': 30, 'ema': None},
     "GBPJPY=X":   {'tp': 200, 'sl': 100, 'pip_value': 0.01, 'swing': 30, 'ema': None},
-    # 14 pair lainnya dengan 7 candle
-    "USDJPY=X":   {'tp': 80,  'sl': 75,  'pip_value': 0.01, 'swing': 7, 'ema': None},
-    "CHFJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01, 'swing': 7, 'ema': None},
-    "AUDJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01, 'swing': 7, 'ema': None},
-    "EURJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01, 'swing': 7, 'ema': None},
-    "CADJPY=X":   {'tp': 100, 'sl': 40,  'pip_value': 0.01, 'swing': 7, 'ema': None},
-    "NZDJPY=X":   {'tp': 100, 'sl': 60,  'pip_value': 0.01, 'swing': 7, 'ema': None},
-    "AUDUSD=X":   {'tp': 100, 'sl': 75,  'pip_value': 0.0001, 'swing': 7, 'ema': None},
-    "EURGBP=X":   {'tp': 80,  'sl': 75,  'pip_value': 0.0001, 'swing': 7, 'ema': None},
-    "NZDUSD=X":   {'tp': 120, 'sl': 100, 'pip_value': 0.0001, 'swing': 7, 'ema': None},
-    "USDCHF=X":   {'tp': 80,  'sl': 50,  'pip_value': 0.0001, 'swing': 7, 'ema': None},
-    "EURUSD=X":   {'tp': 120, 'sl': 100, 'pip_value': 0.0001, 'swing': 7, 'ema': None},
-    "GBPUSD=X":   {'tp': 150, 'sl': 125, 'pip_value': 0.0001, 'swing': 7, 'ema': None},
-    "USDCAD=X":   {'tp': 100, 'sl': 60,  'pip_value': 0.0001, 'swing': 7, 'ema': None},
-    "EURNZD=X":   {'tp': 120, 'sl': 100, 'pip_value': 0.0001, 'swing': 7, 'ema': None},
+    "USDJPY=X":   {'tp': 200, 'sl': 100, 'pip_value': 0.01, 'swing': 30, 'ema': None},
+    "AUDUSD=X":   {'tp': 200, 'sl': 125, 'pip_value': 0.0001, 'swing': 30, 'ema': None},
 }
 
 SENT_LOG_FILE = "sent_signals.json"
@@ -195,15 +179,13 @@ def scan_symbol(symbol):
     swing_n = cfg['swing']
     ema_period = cfg['ema']
 
-    # Deteksi swing sesuai aturan
+    # Deteksi swing (30 candle = 15 kiri, 15 kanan)
     if swing_n == 30:
         df = detect_swings(df, left=15, right=15)
-    elif swing_n == 7:
-        df = detect_swings(df, left=3, right=3)
     else:
-        df = detect_swings(df, left=5, right=5)
+        df = detect_swings(df, left=3, right=3)
 
-    # Filter EMA hanya jika diaktifkan
+    # Filter EMA jika diaktifkan
     if ema_period is not None:
         df['EMA'] = df['Close'].ewm(span=ema_period, adjust=False).mean()
         df = df[(df['Top'] & (df['Close'] < df['EMA'])) | (df['Bottom'] & (df['Close'] > df['EMA']))]
