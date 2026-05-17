@@ -15,7 +15,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 SYMBOLS = [
-    "GC=F",        # XAUUSD (EMA 20)
+    "GC=F",        # XAUUSD (30 candle, tanpa EMA)
     "USDJPY=X", "GBPJPY=X", "CHFJPY=X", "AUDJPY=X",
     "EURJPY=X", "CADJPY=X", "NZDJPY=X",
     "AUDUSD=X", "EURGBP=X", "NZDUSD=X", "USDCHF=X",
@@ -23,7 +23,7 @@ SYMBOLS = [
 ]
 
 PAIR_CONFIG = {
-    "GC=F":       {'tp': 500, 'sl': 300, 'pip_value': 0.10, 'swing': 11, 'ema': 20},
+    "GC=F":       {'tp': 500, 'sl': 400, 'pip_value': 0.10, 'swing': 30, 'ema': None},
     "USDJPY=X":   {'tp': 80,  'sl': 75,  'pip_value': 0.01, 'swing': 7, 'ema': None},
     "GBPJPY=X":   {'tp': 150, 'sl': 100, 'pip_value': 0.01, 'swing': 7, 'ema': None},
     "CHFJPY=X":   {'tp': 150, 'sl': 75,  'pip_value': 0.01, 'swing': 7, 'ema': None},
@@ -192,14 +192,17 @@ def scan_symbol(symbol):
     swing_n = cfg['swing']
     ema_period = cfg['ema']
 
-    # Deteksi swing
-    if swing_n == 11:
-        df = detect_swings(df, left=5, right=5)
-    else:
+    # Deteksi swing sesuai aturan
+    if swing_n == 30:
+        df = detect_swings(df, left=15, right=15)
+    elif swing_n == 7:
         df = detect_swings(df, left=3, right=3)
+    else:
+        # fallback untuk aturan lain (misal 11 candle)
+        df = detect_swings(df, left=5, right=5)
 
-    # Filter EMA jika ada
-    if ema_period:
+    # Filter EMA hanya jika diaktifkan
+    if ema_period is not None:
         df['EMA'] = df['Close'].ewm(span=ema_period, adjust=False).mean()
         df = df[(df['Top'] & (df['Close'] < df['EMA'])) | (df['Bottom'] & (df['Close'] > df['EMA']))]
 
